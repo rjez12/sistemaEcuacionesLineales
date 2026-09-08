@@ -1,0 +1,15 @@
+# =============================================================================
+# Dependencias de pip para CalculadoraMatrices
+# =============================================================================
+# Este proyecto NO requiere paquetes externos de pip.
+# Solo usa la biblioteca estándar de Python:
+#   - tkinter (interfaz gráfica)
+#   - ctypes   (ajuste DPI en Windows)
+#
+# En macOS con Python de Homebrew, tkinter se instala a nivel de sistema:
+#   brew install python-tk@3.13
+#
+# En Ubuntu/Debian:
+#   sudo apt install python3-tk
+#
+# En Windows, tkinter viene incluido con la instalación oficial de Python.

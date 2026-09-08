@@ -1,8 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import ctypes
+from fractions import Fraction
 
-from AlgebraModel import AlgebraModel, a_subindice, a_fraccion_str
+from AlgebraModel import AlgebraModel, a_subindice, a_fraccion_str, parsear_entrada
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -57,7 +58,7 @@ class InterfasCalculadora:
     def crear_entry_suave(self, parent, is_vector=False):
         bg_color = self.colors["vector_b"] if is_vector else self.colors["bg_entry"]
         fg_color = self.colors["b_text"] if is_vector else self.colors["fg_text"]
-        return tk.Entry(parent, width=6, justify="center", font=("Consolas", 12),
+        return tk.Entry(parent, width=8, justify="center", font=("Consolas", 12),
                         bg=bg_color, fg=fg_color, relief="flat", insertbackground=self.colors["fg_text"],
                         highlightthickness=1, highlightbackground=self.colors["bg_panel"], highlightcolor=self.colors["accent"])
 
@@ -106,9 +107,93 @@ class InterfasCalculadora:
                         fila_str += f"{valor_str:^8}"
             self.log(consola, f"  [ {fila_str} ]", "matriz")
 
+    def leer_matriz_fracciones(self, entradas, n_cols):
+        matriz = []
+        conversiones = []
+        for i, fila_ents in enumerate(entradas):
+            fila = []
+            for j in range(n_cols):
+                texto = fila_ents[j].get()
+                valor = parsear_entrada(texto)
+                texto_norm = texto.strip().replace(",", ".")
+                if "." in texto_norm:
+                    conversiones.append((i, j, texto.strip(), valor))
+                fila.append(valor)
+            matriz.append(fila)
+        return matriz, conversiones
+
+    def registrar_conversiones(self, consola, conversiones, n_vars):
+        if not conversiones:
+            return
+        self.log(consola, "\n[>] Conversión de decimales a fracciones exactas:", "variable")
+        for i, j, texto, valor in conversiones:
+            etiqueta = f"x{a_subindice(j + 1)}" if j < n_vars else "b"
+            self.log(consola, f"    Fila {i + 1}, {etiqueta}: {texto}  →  {a_fraccion_str(valor)}", "explicacion")
+
+    def registrar_pasos(self, consola, pasos, pivotes=None):
+        for item in pasos:
+            tipo, msg = item[0], item[1]
+            mat = item[2] if len(item) > 2 else None
+            if tipo == "info":
+                self.log(consola, f"\n    [i] {msg}", "explicacion")
+            elif tipo == "pivoteo":
+                self.log(consola, f"\n[🔄] {msg}:", "variable")
+                if mat is not None:
+                    self.formatear_matriz(mat, consola, pivotes)
+            elif tipo == "operacion":
+                self.log(consola, f"\n[⬇] Operación: {msg}", "variable")
+                if mat is not None:
+                    self.formatear_matriz(mat, consola, pivotes)
+
+    def mostrar_clasificacion_y_solucion(self, consola, m, n, Ab_rref, pivotes_pos, matriz_original=None):
+        inconsistente, fila_err = AlgebraModel.es_inconsistente(m, n, Ab_rref)
+        if inconsistente:
+            self.log(consola, "\n" + "━" * 70, "comment")
+            self.log(consola, "DIAGNÓSTICO DEL SISTEMA:", "alerta")
+            self.log(consola, f"[!] ERROR EN FILA {fila_err + 1}: 0 = {a_fraccion_str(Ab_rref[fila_err][n])}", "alerta")
+            self.log(consola, "-> ESTADO: Sistema Inconsistente (Sin Solución).", "alerta")
+            return
+
+        cols_pivote_str = ", ".join(str(p[1] + 1) for p in pivotes_pos) if pivotes_pos else "Ninguna"
+        self.log(consola, "\n" + "━" * 70, "comment")
+        self.log(consola, f"2. DETECCIÓN DE PIVOTES:\n   Las columnas pivote son: {cols_pivote_str}", "titulo")
+
+        vars_basicas, vars_libres, lineas_solucion = AlgebraModel.construir_solucion_general(m, n, Ab_rref, pivotes_pos)
+        basicas_str = ", ".join(f"x{a_subindice(j + 1)}" for j in vars_basicas) if vars_basicas else "Ninguna"
+        libres_str = ", ".join(f"x{a_subindice(j + 1)}" for j in vars_libres) if vars_libres else "Ninguna"
+
+        self.log(consola, "\n3. CLASIFICACIÓN DE VARIABLES:", "titulo")
+        self.log(consola, f"   • Variables Básicas: {basicas_str}", "exito")
+        self.log(consola, f"   • Variables Libres:  {libres_str}", "variable")
+
+        self.log(consola, "\n4. ESTRUCTURA DE LA SOLUCIÓN FINAL:", "titulo")
+        for linea in lineas_solucion:
+            self.log(consola, f"   {linea}", "variable" if "x" in linea else "exito")
+
+        if matriz_original is None or vars_libres:
+            return
+
+        x = [Fraction(0) for _ in range(n)]
+        for f, c in pivotes_pos:
+            x[c] = Ab_rref[f][n]
+
+        self.log(consola, "\n[>] VERIFICACIÓN AUTOMÁTICA:", "titulo")
+        verificacion_ok = True
+        for i in range(m):
+            suma_ver = sum(matriz_original[i][j] * x[j] for j in range(n))
+            val_esp = matriz_original[i][n]
+            coincide = suma_ver == val_esp
+            estado = "[OK]" if coincide else "[FALLO]"
+            color = "success" if coincide else "error"
+            self.log(consola, f"    {estado} Ec. {i + 1} -> Calc: {a_fraccion_str(suma_ver)} | Esp: {a_fraccion_str(val_esp)}", color)
+            if not coincide:
+                verificacion_ok = False
+        if verificacion_ok:
+            self.log(consola, "\n[✔] VERIFICACIÓN APROBADA: La solución preserva la igualdad.", "exito")
+
     # --- MÓDULO 1: ELIMINACIÓN GAUSSIANA ---
     def construir_modulo_gauss(self, parent):
-        ttk.Label(parent, text="Método de Eliminación por Filas y Sustitución Hacia Atrás", font=("Segoe UI", 12), foreground=self.colors["comment"]).pack(pady=10)
+        ttk.Label(parent, text="Eliminación por filas, RREF, pivotes y solución general", font=("Segoe UI", 12), foreground=self.colors["comment"]).pack(pady=10)
 
         frame_dim = ttk.Frame(parent)
         frame_dim.pack()
@@ -161,77 +246,44 @@ class InterfasCalculadora:
 
     def m1_resolver(self):
         self.m1_consola.delete('1.0', tk.END)
-        Ab = []
         try:
-            for i in range(self.m1_m):
-                Ab.append([float(self.m1_entradas[i][j].get()) for j in range(self.m1_n + 1)])
+            Ab, conversiones = self.leer_matriz_fracciones(self.m1_entradas, self.m1_n + 1)
         except ValueError:
-            messagebox.showerror("Error", "Celdas inválidas.")
+            messagebox.showerror("Error", "Celdas vacías o inválidas. Usa enteros, decimales (0.5) o fracciones (1/3).")
             return
 
         matriz_original = [fila[:] for fila in Ab]
 
-        self.log(self.m1_consola, "=== INICIANDO REDUCCIÓN POR ELIMINACIÓN ===", "titulo")
+        self.log(self.m1_consola, "=== FASE 1: ELIMINACIÓN GAUSSIANA (FORMA ESCALONADA) ===", "titulo")
+        self.registrar_conversiones(self.m1_consola, conversiones, self.m1_n)
         self.log(self.m1_consola, "\n[>] Matriz Aumentada Inicial:", "variable")
         self.formatear_matriz(Ab, self.m1_consola)
 
-        Ab_escalonada, pasos = AlgebraModel.eliminacion_gaussiana(self.m1_m, self.m1_n, Ab)
-
-        for tipo, msg, *resto in pasos:
-            if tipo == "info":
-                self.log(self.m1_consola, f"\n    [i] {msg}", "explicacion")
-            elif tipo == "pivoteo":
-                self.log(self.m1_consola, f"\n[🔄] {msg}:", "variable")
-                self.formatear_matriz(resto[0], self.m1_consola)
-            elif tipo == "operacion":
-                self.log(self.m1_consola, f"\n[⬇] Operación: {msg}", "variable")
-                self.formatear_matriz(resto[0], self.m1_consola)
+        Ab_escalonada, pasos, pivotes_pos = AlgebraModel.eliminacion_gaussiana(self.m1_m, self.m1_n, Ab)
+        self.registrar_pasos(self.m1_consola, pasos, pivotes_pos)
 
         self.log(self.m1_consola, "\n[✔] MATRIZ ESCALONADA FINALIZADA:", "exito")
-        self.formatear_matriz(Ab_escalonada, self.m1_consola)
+        self.formatear_matriz(Ab_escalonada, self.m1_consola, pivotes_pos)
 
-        self.log(self.m1_consola, "\n" + "━"*70, "comment")
-        self.log(self.m1_consola, "DIAGNÓSTICO DEL SISTEMA MATEMÁTICO:", "titulo")
-
-        inconsistente = False
-        for i in range(self.m1_m):
-            if all(Ab_escalonada[i][j] == 0 for j in range(self.m1_n)) and Ab_escalonada[i][self.m1_n] != 0:
-                inconsistente = True
-                self.log(self.m1_consola, f"\n[!] ERROR EN FILA {i+1}: 0 = {a_fraccion_str(Ab_escalonada[i][self.m1_n])}", "alerta")
-                break
-
+        inconsistente, fila_err = AlgebraModel.es_inconsistente(self.m1_m, self.m1_n, Ab_escalonada)
         if inconsistente:
+            self.log(self.m1_consola, "\n" + "━" * 70, "comment")
+            self.log(self.m1_consola, "DIAGNÓSTICO DEL SISTEMA:", "alerta")
+            self.log(self.m1_consola, f"[!] ERROR EN FILA {fila_err + 1}: 0 = {a_fraccion_str(Ab_escalonada[fila_err][self.m1_n])}", "alerta")
             self.log(self.m1_consola, "-> ESTADO: Sistema Inconsistente (Sin Solución).", "alerta")
             return
 
-        rango = sum(1 for i in range(self.m1_m) if not all(Ab_escalonada[i][j] == 0 for j in range(self.m1_n)))
+        self.log(self.m1_consola, "\n=== FASE 2: FORMA ESCALONADA REDUCIDA (RREF) ===", "titulo")
+        Ab_rref, pivotes_pos, pasos_rref = AlgebraModel.completar_rref(self.m1_m, self.m1_n, Ab_escalonada)
+        self.registrar_pasos(self.m1_consola, pasos_rref, pivotes_pos)
 
-        if rango < self.m1_n:
-            self.log(self.m1_consola, f"-> ESTADO: Sistema Consistente Indeterminado ({self.m1_n - rango} variables libres).", "variable")
-            return
+        self.log(self.m1_consola, "\n" + "━" * 70, "comment")
+        self.log(self.m1_consola, "1. FORMA ESCALONADA REDUCIDA FINAL (RREF):", "exito")
+        self.formatear_matriz(Ab_rref, self.m1_consola, pivotes_pos)
 
-        self.log(self.m1_consola, "-> ESTADO: Sistema Consistente Determinado (Solución Única).", "exito")
-
-        x = AlgebraModel.sustitucion_hacia_atras(self.m1_m, self.m1_n, Ab_escalonada)
-
-        self.log(self.m1_consola, "\n[>] SUSTITUCIÓN HACIA ATRÁS (Vector Solución):", "titulo")
-        for i in range(self.m1_n):
-            self.log(self.m1_consola, f"    x{a_subindice(i+1)} = {a_fraccion_str(x[i])}", "variable")
-
-        self.log(self.m1_consola, "\n[>] VERIFICACIÓN AUTOMÁTICA:", "titulo")
-        verificacion_ok = True
-        for i in range(self.m1_m):
-            suma_ver = sum(matriz_original[i][j] * float(x[j]) for j in range(self.m1_n))
-            val_esp = matriz_original[i][self.m1_n]
-            diferencia = abs(suma_ver - val_esp)
-
-            estado = "[OK]" if diferencia < 1e-5 else "[FALLO]"
-            color = "success" if diferencia < 1e-5 else "error"
-            self.log(self.m1_consola, f"    {estado} Ec. {i+1} -> Calc: {round(suma_ver, 4)} | Esp: {round(val_esp, 4)}", color)
-            if diferencia > 1e-5: verificacion_ok = False
-
-        if verificacion_ok:
-            self.log(self.m1_consola, "\n[✔] VERIFICACIÓN APROBADA: La solución preserva la igualdad.", "exito")
+        self.mostrar_clasificacion_y_solucion(
+            self.m1_consola, self.m1_m, self.m1_n, Ab_rref, pivotes_pos, matriz_original
+        )
 
     # --- MÓDULO 2: RREF AVANZADA (GAUSS-JORDAN) ---
     def construir_modulo_rref(self, parent):
@@ -285,54 +337,31 @@ class InterfasCalculadora:
 
     def m2_resolver(self):
         self.m2_consola.delete('1.0', tk.END)
-        Ab = []
         try:
-            for i in range(self.m2_m): 
-                Ab.append([float(self.m2_entradas[i][j].get()) for j in range(self.m2_n + 1)])
+            Ab, conversiones = self.leer_matriz_fracciones(self.m2_entradas, self.m2_n + 1)
         except ValueError:
-            messagebox.showerror("Error", "Celdas inválidas.")
+            messagebox.showerror("Error", "Celdas vacías o inválidas. Usa enteros, decimales (0.5) o fracciones (1/3).")
             return
 
         self.log(self.m2_consola, "=== PROCESAMIENTO: GAUSS-JORDAN (SELECCIÓN DE PIVOTE ÓPTIMO) ===", "titulo")
-        
+        self.registrar_conversiones(self.m2_consola, conversiones, self.m2_n)
+
         Ab_rref, pivotes_pos, pasos, es_inconsistente = AlgebraModel.gauss_jordan_rref(self.m2_m, self.m2_n, Ab)
+        self.registrar_pasos(self.m2_consola, pasos, pivotes_pos)
 
-        for tipo, msg, mat in pasos:
-            if tipo == "pivoteo":
-                self.log(self.m2_consola, f"\n[🔄] {msg}:", "variable")
-            elif tipo == "operacion":
-                self.log(self.m2_consola, f"\n[⬇] Operación: {msg}", "explicacion")
-            self.formatear_matriz(mat, self.m2_consola)
-
-        # 1. Matriz RREF Final
-        self.log(self.m2_consola, "\n" + "━"*70, "comment")
+        self.log(self.m2_consola, "\n" + "━" * 70, "comment")
         self.log(self.m2_consola, "1. FORMA ESCALONADA REDUCIDA FINAL (RREF):", "exito")
         self.formatear_matriz(Ab_rref, self.m2_consola, pivotes_pos)
 
         if es_inconsistente:
-            self.log(self.m2_consola, "\n" + "━"*70, "comment")
+            self.log(self.m2_consola, "\n" + "━" * 70, "comment")
             self.log(self.m2_consola, "DIAGNÓSTICO DEL SISTEMA:", "alerta")
             self.log(self.m2_consola, "-> ESTADO: Sistema Inconsistente (Sin Solución). Existe una fila [ 0 ... 0 │ c ] con c ≠ 0.", "alerta")
             return
 
-        # 2. Detección de Pivotes
-        self.log(self.m2_consola, "\n" + "━"*70, "comment")
-        cols_pivote_str = ", ".join([str(p[1] + 1) for p in pivotes_pos]) if pivotes_pos else "Ninguna"
-        self.log(self.m2_consola, f"2. DETECCIÓN DE PIVOTES:\n   Las columnas pivote son: {cols_pivote_str}", "titulo")
-
-        # 3. Clasificación de Variables
-        vars_basicas, vars_libres, lineas_solucion = AlgebraModel.construir_solucion_general(self.m2_m, self.m2_n, Ab_rref, pivotes_pos)
-        basicas_str = ", ".join([f"x{a_subindice(j+1)}" for j in vars_basicas]) if vars_basicas else "Ninguna"
-        libres_str = ", ".join([f"x{a_subindice(j+1)}" for j in vars_libres]) if vars_libres else "Ninguna"
-
-        self.log(self.m2_consola, "\n3. CLASIFICACIÓN DE VARIABLES:", "titulo")
-        self.log(self.m2_consola, f"   • Variables Básicas: {basicas_str}", "exito")
-        self.log(self.m2_consola, f"   • Variables Libres:  {libres_str}", "variable")
-
-        # 4. Solución Final
-        self.log(self.m2_consola, "\n4. ESTRUCTURA DE LA SOLUCIÓN FINAL:", "titulo")
-        for linea in lineas_solucion:
-            self.log(self.m2_consola, f"   {linea}", "variable" if "Paramétrica" in linea or "x" in linea else "exito")
+        self.mostrar_clasificacion_y_solucion(
+            self.m2_consola, self.m2_m, self.m2_n, Ab_rref, pivotes_pos, Ab
+        )
 
     # --- MÓDULO 3: ECUACIÓN MATRICIAL (Ax) ---
     def construir_modulo_combinacion(self, parent):
@@ -394,15 +423,15 @@ class InterfasCalculadora:
 
     def m3_calcular(self):
         self.m3_consola.delete('1.0', tk.END)
-        A, x = [], []
         try:
-            for i in range(self.m3_m): 
-                A.append([float(self.m3_entradas_A[i][j].get()) for j in range(self.m3_n)])
-            x = [float(self.m3_entradas_x[j].get()) for j in range(self.m3_n)]
+            A, conversiones_A = self.leer_matriz_fracciones(self.m3_entradas_A, self.m3_n)
+            x = [parsear_entrada(self.m3_entradas_x[j].get()) for j in range(self.m3_n)]
         except ValueError:
+            messagebox.showerror("Error", "Celdas vacías o inválidas. Usa enteros, decimales (0.5) o fracciones (1/3).")
             return
 
         self.log(self.m3_consola, "=== COMBINACIÓN LINEAL ===", "titulo")
+        self.registrar_conversiones(self.m3_consola, conversiones_A, self.m3_n)
         comb_str = ""
         for j in range(self.m3_n):
             peso = a_fraccion_str(x[j])

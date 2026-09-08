@@ -5,9 +5,31 @@ def a_subindice(numero):
     subindices = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
     return str(numero).translate(subindices)
 
+def parsear_entrada(texto):
+    """Convierte texto de celda (entero, decimal, coma o fracción a/b) a Fraction exacta."""
+    if texto is None:
+        raise ValueError("Celda vacía")
+    normalizado = str(texto).strip().replace(",", ".")
+    if normalizado == "":
+        raise ValueError("Celda vacía")
+    try:
+        return Fraction(normalizado).limit_denominator(10**6)
+    except (ValueError, ZeroDivisionError) as exc:
+        raise ValueError(f"Valor no numérico: {texto}") from exc
+
+def a_fraccion(valor):
+    """Normaliza un valor (Fraction, int, float o str) a Fraction."""
+    if isinstance(valor, Fraction):
+        return valor
+    if isinstance(valor, str):
+        return parsear_entrada(valor)
+    if isinstance(valor, int):
+        return Fraction(valor)
+    return Fraction(valor).limit_denominator(1000)
+
 def a_fraccion_str(valor):
     """Convierte un número o Fraction a un string formateado como fracción."""
-    f = Fraction(valor).limit_denominator(1000)
+    f = a_fraccion(valor)
     if f.denominator == 1:
         return str(f.numerator)
     return f"{f.numerator}/{f.denominator}"
@@ -17,10 +39,33 @@ class AlgebraModel:
 
     # --- MÓDULO 1: ELIMINACIÓN GAUSSIANA ORIGINAL ---
     @staticmethod
+    def _copiar_matriz(Ab):
+        return [fila[:] for fila in Ab]
+
+    @staticmethod
+    def detectar_pivotes(m, n, Ab):
+        """Devuelve pares (fila, columna) del primer no-cero de cada fila no nula."""
+        pivotes_pos = []
+        for i in range(m):
+            for j in range(n):
+                if Ab[i][j] != 0:
+                    pivotes_pos.append((i, j))
+                    break
+        return pivotes_pos
+
+    @staticmethod
+    def es_inconsistente(m, n, Ab):
+        for i in range(m):
+            if all(Ab[i][j] == 0 for j in range(n)) and Ab[i][n] != 0:
+                return True, i
+        return False, None
+
+    @staticmethod
     def eliminacion_gaussiana(m, n, Ab_float):
         """Ejecuta la eliminación gaussiana hacia abajo con pivoteo parcial."""
-        Ab = [[Fraction(val).limit_denominator(1000) for val in fila] for fila in Ab_float]
+        Ab = [[a_fraccion(val) for val in fila] for fila in Ab_float]
         pasos = []
+        pivotes_pos = []
         fila_pivote = 0
 
         for j in range(n):
@@ -38,7 +83,7 @@ class AlgebraModel:
 
             if max_fila != fila_pivote:
                 Ab[fila_pivote], Ab[max_fila] = Ab[max_fila], Ab[fila_pivote]
-                pasos.append(("pivoteo", f"Pivoteo Parcial (Fila {fila_pivote+1} ↔ Fila {max_fila+1})", [f[:] for f in Ab]))
+                pasos.append(("pivoteo", f"Pivoteo Parcial (Fila {fila_pivote+1} ↔ Fila {max_fila+1})", AlgebraModel._copiar_matriz(Ab)))
 
             hubo_cambio = False
             for i in range(fila_pivote + 1, m):
@@ -47,11 +92,36 @@ class AlgebraModel:
                     for k in range(j, n + 1):
                         Ab[i][k] -= factor * Ab[fila_pivote][k]
                     hubo_cambio = True
-                    pasos.append(("operacion", f"F{a_subindice(i+1)} = F{a_subindice(i+1)} - ({a_fraccion_str(factor)}) * F{a_subindice(fila_pivote+1)}", [f[:] for f in Ab]))
+                    pasos.append(("operacion", f"F{a_subindice(i+1)} = F{a_subindice(i+1)} - ({a_fraccion_str(factor)}) * F{a_subindice(fila_pivote+1)}", AlgebraModel._copiar_matriz(Ab)))
 
+            pivotes_pos.append((fila_pivote, j))
             fila_pivote += 1
 
-        return Ab, pasos
+        return Ab, pasos, pivotes_pos
+
+    @staticmethod
+    def completar_rref(m, n, Ab_escalonada):
+        """Parte de una matriz escalonada: pivotes a 1 y ceros por encima."""
+        Ab = AlgebraModel._copiar_matriz(Ab_escalonada)
+        pasos = []
+        pivotes_pos = AlgebraModel.detectar_pivotes(m, n, Ab)
+
+        for f_piv, c_piv in pivotes_pos:
+            pivote_val = Ab[f_piv][c_piv]
+            if pivote_val != 1:
+                for k in range(c_piv, n + 1):
+                    Ab[f_piv][k] /= pivote_val
+                pasos.append(("operacion", f"F{a_subindice(f_piv+1)} = F{a_subindice(f_piv+1)} / ({a_fraccion_str(pivote_val)})", AlgebraModel._copiar_matriz(Ab)))
+
+        for f_piv, c_piv in reversed(pivotes_pos):
+            for i in range(f_piv - 1, -1, -1):
+                factor = Ab[i][c_piv]
+                if factor != 0:
+                    for k in range(c_piv, n + 1):
+                        Ab[i][k] -= factor * Ab[f_piv][k]
+                    pasos.append(("operacion", f"F{a_subindice(i+1)} = F{a_subindice(i+1)} - ({a_fraccion_str(factor)}) * F{a_subindice(f_piv+1)}", AlgebraModel._copiar_matriz(Ab)))
+
+        return Ab, pivotes_pos, pasos
 
     @staticmethod
     def sustitucion_hacia_atras(m, n, Ab):
@@ -69,7 +139,7 @@ class AlgebraModel:
         Ejecuta la reducción de Gauss-Jordan priorizando pivotes enteros (1 o -1)
         para evitar trabajar con fracciones en pasos intermedios.
         """
-        Ab = [[Fraction(val).limit_denominator(1000) for val in fila] for fila in Ab_float]
+        Ab = [[a_fraccion(val) for val in fila] for fila in Ab_float]
         pasos = []
         pivotes_pos = []
         fila_pivote = 0
@@ -187,8 +257,8 @@ class AlgebraModel:
     @staticmethod
     def producto_ax(m, n, A_float, x_float):
         """Calcula el producto Ax utilizando objetos Fraction."""
-        A = [[Fraction(val).limit_denominator(1000) for val in fila] for fila in A_float]
-        x = [Fraction(val).limit_denominator(1000) for val in x_float]
+        A = [[a_fraccion(val) for val in fila] for fila in A_float]
+        x = [a_fraccion(val) for val in x_float]
         
         b = []
         detalles = []
