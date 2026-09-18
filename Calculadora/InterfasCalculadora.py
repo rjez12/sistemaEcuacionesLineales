@@ -201,16 +201,16 @@ class InterfasCalculadora:
                 break
 
         if inconsistente:
-            self.log(self.m1_consola, "-> ESTADO: Sistema Inconsistente (Sin Solución).", "alerta")
+            self.log(self.m1_consola, "-> TIPO DE SISTEMA: Inconsistente (Sin Solución).", "alerta")
             return
 
         rango = sum(1 for i in range(self.m1_m) if not all(Ab_escalonada[i][j] == 0 for j in range(self.m1_n)))
 
         if rango < self.m1_n:
-            self.log(self.m1_consola, f"-> ESTADO: Sistema Consistente Indeterminado ({self.m1_n - rango} variables libres).", "variable")
+            self.log(self.m1_consola, f"-> TIPO DE SISTEMA: Consistente Indeterminado (Infinitas soluciones, {self.m1_n - rango} variables libres).", "variable")
             return
 
-        self.log(self.m1_consola, "-> ESTADO: Sistema Consistente Determinado (Solución Única).", "exito")
+        self.log(self.m1_consola, "-> TIPO DE SISTEMA: Consistente Determinado (Solución Única).", "exito")
 
         x = AlgebraModel.sustitucion_hacia_atras(self.m1_m, self.m1_n, Ab_escalonada)
 
@@ -309,19 +309,27 @@ class InterfasCalculadora:
         self.log(self.m2_consola, "1. FORMA ESCALONADA REDUCIDA FINAL (RREF):", "exito")
         self.formatear_matriz(Ab_rref, self.m2_consola, pivotes_pos)
 
+        # Clasificación del Sistema
+        self.log(self.m2_consola, "\n" + "━"*70, "comment")
+        self.log(self.m2_consola, "DIAGNÓSTICO DEL SISTEMA MATEMÁTICO:", "titulo")
+        
         if es_inconsistente:
-            self.log(self.m2_consola, "\n" + "━"*70, "comment")
-            self.log(self.m2_consola, "DIAGNÓSTICO DEL SISTEMA:", "alerta")
-            self.log(self.m2_consola, "-> ESTADO: Sistema Inconsistente (Sin Solución). Existe una fila [ 0 ... 0 │ c ] con c ≠ 0.", "alerta")
+            self.log(self.m2_consola, "-> TIPO DE SISTEMA: Inconsistente (Sin Solución). Existe una fila [ 0 ... 0 │ c ] con c ≠ 0.", "alerta")
             return
 
         # 2. Detección de Pivotes
-        self.log(self.m2_consola, "\n" + "━"*70, "comment")
         cols_pivote_str = ", ".join([str(p[1] + 1) for p in pivotes_pos]) if pivotes_pos else "Ninguna"
-        self.log(self.m2_consola, f"2. DETECCIÓN DE PIVOTES:\n   Las columnas pivote son: {cols_pivote_str}", "titulo")
-
+        
         # 3. Clasificación de Variables
         vars_basicas, vars_libres, lineas_solucion = AlgebraModel.construir_solucion_general(self.m2_m, self.m2_n, Ab_rref, pivotes_pos)
+        
+        if not vars_libres:
+            self.log(self.m2_consola, "-> TIPO DE SISTEMA: Consistente Determinado (Solución Única).", "exito")
+        else:
+            self.log(self.m2_consola, f"-> TIPO DE SISTEMA: Consistente Indeterminado (Infinitas soluciones, {len(vars_libres)} variables libres).", "variable")
+
+        self.log(self.m2_consola, "\n2. DETECCIÓN DE PIVOTES:\n   Las columnas pivote son: " + cols_pivote_str, "titulo")
+
         basicas_str = ", ".join([f"x{a_subindice(j+1)}" for j in vars_basicas]) if vars_basicas else "Ninguna"
         libres_str = ", ".join([f"x{a_subindice(j+1)}" for j in vars_libres]) if vars_libres else "Ninguna"
 
@@ -422,3 +430,7 @@ class InterfasCalculadora:
         self.log(self.m3_consola, "\n[✔] VECTOR RESULTANTE (b):", "exito")
         for val in b: 
             self.log(self.m3_consola, f"  [ {a_fraccion_str(val):^8} ]", "error")
+
+        self.log(self.m3_consola, "\n" + "━"*70, "comment")
+        self.log(self.m3_consola, "DIAGNÓSTICO DEL SISTEMA GENERADO:", "titulo")
+        self.log(self.m3_consola, "-> TIPO DE SISTEMA: Consistente (El vector x evaluado es solución exacta del vector b resultante).", "exito")
